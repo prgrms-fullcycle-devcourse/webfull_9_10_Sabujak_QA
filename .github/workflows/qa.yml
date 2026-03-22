@@ -1,0 +1,98 @@
+name: Sabujak QA
+
+on:
+  workflow_dispatch:
+    inputs:
+      qa_env:
+        description: "QA target environment (mock | staging | real)"
+        required: false
+        default: "staging"
+      app_base_url:
+        description: "Frontend base URL"
+        required: false
+      api_base_url:
+        description: "API base URL"
+        required: false
+      test_capsule_slug:
+        description: "Slug prefix used by QA"
+        required: false
+      test_admin_password:
+        description: "Admin password used by QA"
+        required: false
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    outputs:
+      ready: ${{ steps.check.outputs.ready }}
+    env:
+      QA_ENV: ${{ github.event.inputs.qa_env || vars.QA_ENV || 'staging' }}
+      APP_BASE_URL: ${{ github.event.inputs.app_base_url || vars.APP_BASE_URL }}
+      API_BASE_URL: ${{ github.event.inputs.api_base_url || vars.API_BASE_URL }}
+      TEST_CAPSULE_SLUG: ${{ github.event.inputs.test_capsule_slug || vars.TEST_CAPSULE_SLUG || 'sabujak-qa' }}
+      TEST_ADMIN_PASSWORD: ${{ github.event.inputs.test_admin_password || secrets.TEST_ADMIN_PASSWORD }}
+    steps:
+      - name: Check QA target configuration
+        id: check
+        run: |
+          ready=true
+          for key in APP_BASE_URL API_BASE_URL TEST_CAPSULE_SLUG TEST_ADMIN_PASSWORD; do
+            if [ -z "${!key}" ]; then
+              echo "::warning::Missing $key"
+              ready=false
+            fi
+          done
+          echo "ready=$ready" >> "$GITHUB_OUTPUT"
+          echo "QA_ENV=${QA_ENV}"
+          echo "APP_BASE_URL=${APP_BASE_URL:-missing}"
+          echo "API_BASE_URL=${API_BASE_URL:-missing}"
+      - name: Explain skipped QA
+        if: steps.check.outputs.ready != 'true'
+        run: |
+          echo "QA job skipped."
+          echo "Set repository vars/secrets or workflow_dispatch inputs for APP_BASE_URL, API_BASE_URL, TEST_CAPSULE_SLUG, TEST_ADMIN_PASSWORD."
+
+  qa:
+    needs: preflight
+    if: needs.preflight.outputs.ready == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      QA_ENV: ${{ github.event.inputs.qa_env || vars.QA_ENV || 'staging' }}
+      APP_BASE_URL: ${{ github.event.inputs.app_base_url || vars.APP_BASE_URL }}
+      API_BASE_URL: ${{ github.event.inputs.api_base_url || vars.API_BASE_URL }}
+      TEST_CAPSULE_SLUG: ${{ github.event.inputs.test_capsule_slug || vars.TEST_CAPSULE_SLUG || 'sabujak-qa' }}
+      TEST_ADMIN_PASSWORD: ${{ github.event.inputs.test_admin_password || secrets.TEST_ADMIN_PASSWORD }}
+      PLAYWRIGHT_OUTPUT_DIR: .playwright-output
+    steps:
+      - name: Checkout QA repo
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: QA preflight
+        run: npm run qa:preflight
+
+      - name: Run Sabujak QA
+        run: npm run qa:test
+
+      - name: Upload Playwright artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: .playwright-output
+          if-no-files-found: ignore

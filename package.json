@@ -1,0 +1,16 @@
+{
+  "name": "webfull-9-10-sabujak-qa",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "qa:preflight": "node scripts/qa-preflight.mjs",
+    "qa:test": "playwright test",
+    "qa:test:headed": "playwright test --headed",
+    "qa:install": "playwright install --with-deps chromium"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.54.2",
+    "dotenv": "^17.2.3"
+  }
+}
