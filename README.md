@@ -2,6 +2,17 @@
 
 이 레포는 사부작 타임캡슐 서비스의 E2E QA 자동화를 별도 관리하기 위한 QA 전용 저장소다. 프론트엔드와 백엔드 구현 레포와 분리해서 Playwright 기반 테스트, GitHub Actions 워크플로, Codex QA 스킬을 운영한다.
 
+## Quick Start
+
+처음 실행할 때는 아래 순서를 권장한다.
+
+1. FE와 BE 실행 환경 준비
+2. `cp .env.example .env`
+3. `npm install`
+4. `npm run qa:install`
+5. `npm run qa:preflight`
+6. `npm run qa:test`
+
 ## 1. 이 QA 레포의 목적
 
 - QA 레포 자체에서 자동화 워크플로와 테스트 자산을 관리한다.
@@ -59,6 +70,12 @@
 
 로컬에서는 FE/BE를 각각 사람이 직접 실행한다.
 
+권장 기준:
+
+- FE는 프론트엔드 레포에서 `pnpm dev`
+- BE는 가능하면 백엔드 레포에서 `docker compose up --build`
+- BE를 `pnpm run dev`로 직접 띄우려면 백엔드 README의 환경 변수와 DB/Redis 연결 조건을 먼저 맞춘다.
+
 예시:
 
 ```bash
@@ -70,7 +87,7 @@ pnpm dev
 # BE 레포
 cd ../webfull_9_10_Sabujak_BE
 pnpm install
-pnpm run dev
+docker compose up --build
 ```
 
 그 다음 QA 레포에서 실행한다.
@@ -78,6 +95,7 @@ pnpm run dev
 ```bash
 cp .env.example .env
 npm install
+npm run qa:install
 npm run qa:preflight
 npm run qa:test
 ```
@@ -110,13 +128,19 @@ GitHub Actions 워크플로는 `.github/workflows/qa.yml`에 있다.
 cp .env.example .env
 ```
 
-2. 사전 점검
+2. Playwright 브라우저 설치
+
+```bash
+npm run qa:install
+```
+
+3. 사전 점검
 
 ```bash
 npm run qa:preflight
 ```
 
-3. QA 실행
+4. QA 실행
 
 ```bash
 npm run qa:test
