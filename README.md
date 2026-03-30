@@ -35,6 +35,13 @@
 
 이 QA 레포는 FE/BE 코드를 직접 소유하거나 CI에서 자동으로 띄우는 것을 전제로 하지 않는다.
 
+현재 README의 백엔드 동기화 기준은 아래 두 문서다.
+
+- BE main의 `docs/API_SPEC.md`
+- BE open PR [#64 feat: capsule messageCount SSE 구독 endpoint 추가](https://github.com/prgrms-fullcycle-devcourse/webfull_9_10_Sabujak_BE/pull/64)
+
+즉, SSE 관련 설명은 "이미 main에 반영된 REST 규칙"과 "PR 64에서 추가된 messageCount SSE 범위"를 함께 기준으로 정리한다.
+
 ## 3. 선택한 자동화 전략
 
 현재는 `A. FE/BE는 별도로 떠 있는 환경(local/staging)을 대상으로 QA 실행` 전략을 선택했다.
@@ -57,6 +64,10 @@
 - `QA_ENV`: `mock`, `staging`, `real` 중 하나
 - `TEST_CAPSULE_SLUG`: QA용 slug prefix
 - `TEST_ADMIN_PASSWORD`: QA용 관리자 비밀번호
+- `ENABLE_MESSAGE_COUNT_SSE_QA`: `true`일 때만 messageCount SSE QA 실행
+- `ENABLE_LIVE_COUNT_UI_E2E`: `true`일 때만 브라우저 상세 페이지 시나리오 실행
+- `CAPSULE_DETAIL_PATH_TEMPLATE`: 상세 페이지 path template. 기본값 `/capsules/{slug}`
+- `MESSAGE_COUNT_SELECTOR`: 상세 페이지에서 count를 읽을 selector. 권장값 `[data-testid="capsule-message-count"]`
 
 권장 기준은 다음과 같다.
 
@@ -100,6 +111,17 @@ npm run qa:preflight
 npm run qa:test
 ```
 
+messageCount SSE 시나리오까지 켜려면 아래 값을 함께 설정한다.
+
+```bash
+ENABLE_MESSAGE_COUNT_SSE_QA=true
+ENABLE_LIVE_COUNT_UI_E2E=true
+CAPSULE_DETAIL_PATH_TEMPLATE=/capsules/{slug}
+MESSAGE_COUNT_SELECTOR='[data-testid="capsule-message-count"]'
+```
+
+단, 이 값들은 대상 백엔드가 `GET /capsules/{slug}/message-count/stream`를 실제로 제공할 때만 켜야 한다. 현재 기준으로는 BE PR 64가 반영된 로컬 브랜치 또는 해당 내용이 이미 배포된 환경에서만 활성화하는 편이 안전하다.
+
 ### staging
 
 staging에서는 배포된 FE/BE 주소를 `.env` 또는 GitHub repository variables/secrets로 넣고 동일한 명령을 사용한다.
@@ -109,6 +131,8 @@ npm run qa:preflight
 npm run qa:test
 ```
 
+staging 환경이 아직 BE PR 64 배포 이전이라면 SSE 관련 flag는 끄고 core 회귀만 실행하는 것이 맞다.
+
 ### CI
 
 GitHub Actions 워크플로는 `.github/workflows/qa.yml`에 있다.
@@ -117,6 +141,8 @@ GitHub Actions 워크플로는 `.github/workflows/qa.yml`에 있다.
 - `pull_request`: main 대상 PR에서 실행 시도
 
 단, CI는 FE/BE를 직접 띄우지 않는다. `APP_BASE_URL`, `API_BASE_URL`, `TEST_CAPSULE_SLUG`, `TEST_ADMIN_PASSWORD`가 repository vars/secrets 또는 수동 실행 input으로 주어졌을 때만 실제 QA job이 실행된다. 값이 없으면 preflight job만 돌고 QA job은 스킵된다.
+
+현재 기본 workflow는 core 회귀 실행 기준으로 작성되어 있다. 따라서 SSE 전용 flag를 CI에 연결하려면 대상 환경에 PR 64가 반영되어 있는지 먼저 확인한 뒤 workflow env도 함께 확장하는 편이 안전하다.
 
 ## 6. QA 실행 엔트리포인트
 
@@ -161,11 +187,39 @@ npm run qa:test:headed
 - 관리자 비밀번호 검증 후 수정/삭제가 동작하는지
 - `openAt` 변경 시 `expiresAt`이 7일 기준으로 재계산되는지
 - mock 환경과 real 환경 차이가 테스트와 문서에 반영되어 있는지
+- messageCount SSE 초기 snapshot과 상세 조회 값이 충돌 없이 맞춰지는지
+- 메시지 작성 성공 직후 최신 `messageCount`가 SSE로 전파되는지
+- 선택적으로 상세 페이지가 SSE 연결 중에도 새로고침 없이 count를 갱신하는지
 
 현재 `tests/sabujak.qa.spec.mjs`는 mock 환경과 real/staging 환경을 분기해서 검증한다.
 
 - mock: 문서상 현재 구현 차이를 확인하고, 미구현 보안/중복 규칙은 gap으로 기록
 - staging/real: 실제 도메인 규칙을 검증
+
+추가로 `tests/capsule-message-count.sse.spec.mjs`는 신규 SSE 기능을 별도 검증한다.
+
+- 기준 백엔드 범위: BE PR 64
+  - 기존 `GET /capsules/:slug` 상세 조회는 유지
+  - 신규 `GET /capsules/:slug/message-count/stream` 추가
+  - SSE 연결 직후 현재 `messageCount` snapshot 1회 전송
+  - `POST /capsules/:slug/messages` 성공 후 DB 기준 최신 count push
+  - heartbeat comment로 연결 유지
+  - mock 환경은 실제 SSE 미지원
+- 현재 QA 문서의 공식 범위:
+  - initial detail count와 initial SSE snapshot 정합성
+  - 메시지 작성 성공 이후 count 증가 전파
+  - FE 상세 페이지가 SSE로 숫자를 갱신하는지의 opt-in 확인
+- 주의:
+  - 이 브랜치의 SSE spec 파일에는 삭제 기반 감소 시나리오 초안도 포함되어 있지만, BE PR 64 설명상 메시지 삭제 API는 이번 최종 범위에서 제외되어 있다.
+  - 따라서 PR 64 기준 최신 문서에서는 "생성 이후 count 증가 동기화"를 공식 지원 범위로 본다.
+
+- API suite:
+  - `GET /capsules/:slug`의 `messageCount`와 SSE 초기 event가 일치하는지
+  - 메시지 생성 후 SSE event가 count 증가를 push하는지
+- UI suite:
+  - feature flag와 selector를 준 경우에만 실행
+  - 상세 페이지 최초 진입 후 detail API는 1회만 호출되고, 이후 SSE로만 count가 갱신되는지 확인
+  - 브라우저 `EventSource` 연결과 page error를 함께 기록해 화면 안정성을 점검
 
 ## 8. Codex에게 요청하는 방식
 
@@ -190,6 +244,14 @@ npm run qa:test:headed
 - QA 레포에서 Playwright 테스트와 GitHub Actions를 독립 운영한다.
 - local과 staging에서 같은 테스트 코드를 재사용한다.
 - CI는 외부 환경이 준비되었을 때만 안전하게 자동 QA를 수행한다.
+
+messageCount SSE QA의 안정성 메모:
+
+- 신규 API가 아직 배포되지 않은 환경에서는 `ENABLE_MESSAGE_COUNT_SSE_QA=false`로 두어야 한다.
+- mock 환경은 PR 64 설명 기준으로 실제 SSE를 아직 지원하지 않는다.
+- UI 시나리오는 상세 페이지 route와 count selector가 안정적으로 고정되어야 한다.
+- 특히 `MESSAGE_COUNT_SELECTOR`는 숫자 파싱이 가능한 단일 요소로 유지하는 편이 flakiness가 낮다.
+- BE PR 64 범위는 `messageCount` 실시간 반영에 한정되며, 메시지 삭제 기반 감소 전파는 후속 범위로 보는 것이 안전하다.
 
 앞으로의 확장 방향은 다음과 같다.
 

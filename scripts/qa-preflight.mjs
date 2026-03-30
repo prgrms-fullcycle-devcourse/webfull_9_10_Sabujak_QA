@@ -9,7 +9,14 @@ const required = [
   "TEST_ADMIN_PASSWORD",
 ];
 
-const optional = ["QA_ENV", "PLAYWRIGHT_OUTPUT_DIR"];
+const optional = [
+  "QA_ENV",
+  "PLAYWRIGHT_OUTPUT_DIR",
+  "ENABLE_MESSAGE_COUNT_SSE_QA",
+  "ENABLE_LIVE_COUNT_UI_E2E",
+  "CAPSULE_DETAIL_PATH_TEMPLATE",
+  "MESSAGE_COUNT_SELECTOR",
+];
 const missing = required.filter((key) => !process.env[key]);
 const qaEnv = process.env.QA_ENV || "staging";
 
