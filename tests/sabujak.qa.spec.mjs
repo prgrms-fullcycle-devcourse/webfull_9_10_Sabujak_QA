@@ -7,8 +7,16 @@ const TEST_CAPSULE_SLUG = process.env.TEST_CAPSULE_SLUG || "sabujak-qa";
 const TEST_ADMIN_PASSWORD = process.env.TEST_ADMIN_PASSWORD || "0000";
 
 const isMock = QA_ENV === "mock";
-const uniqueSuffix = `${Date.now()}`;
+const uniqueSuffix = Date.now().toString(36);
 const workingSlug = isMock ? TEST_CAPSULE_SLUG : `${TEST_CAPSULE_SLUG}-${uniqueSuffix}`;
+
+function buildUniqueSlug(label) {
+  return `${TEST_CAPSULE_SLUG}-${label}-${Date.now().toString(36)}`;
+}
+
+function buildQaNickname(label = "qa") {
+  return `${label}-${Date.now().toString(36)}`.slice(0, 20);
+}
 
 function apiUrl(pathname) {
   return new URL(pathname, API_BASE_URL).toString();
@@ -30,7 +38,7 @@ async function extractJson(response) {
   return response.json();
 }
 
-test.describe("Sabujak time capsule QA", () => {
+test.describe.serial("Sabujak time capsule QA", () => {
   test.beforeAll(async ({ request }) => {
     if (isMock) {
       return;
@@ -51,6 +59,7 @@ test.describe("Sabujak time capsule QA", () => {
         password: TEST_ADMIN_PASSWORD,
         openAt,
         reservationToken: reservation.reservationToken,
+        reservationSessionToken: reservation.reservationSessionToken,
       },
     });
 
@@ -65,14 +74,16 @@ test.describe("Sabujak time capsule QA", () => {
   });
 
   test("slug reservation returns reservationToken", async ({ request }) => {
+    const reservationSlug = buildUniqueSlug("reservation");
     const response = await request.post(apiUrl("/capsules/slug-reservations"), {
-      data: { slug: workingSlug },
+      data: { slug: reservationSlug },
     });
     const payload = await response.json();
 
     expect(response.status()).toBe(201);
-    expect(payload.slug).toBe(workingSlug);
+    expect(payload.slug).toBe(reservationSlug);
     expect(payload.reservationToken).toBeTruthy();
+    expect(payload.reservationSessionToken).toBeTruthy();
     expect(payload.reservedUntil).toBeTruthy();
   });
 
@@ -81,28 +92,31 @@ test.describe("Sabujak time capsule QA", () => {
       test.skip(true, "real/staging 환경에서는 beforeAll에서 캡슐을 생성한다");
     }
 
+    const createSlug = buildUniqueSlug("create");
     const reservationResponse = await request.post(apiUrl("/capsules/slug-reservations"), {
-      data: { slug: workingSlug },
+      data: { slug: createSlug },
     });
     const reservation = await reservationResponse.json();
     const openAt = isoAfterDays(3);
 
     const createResponse = await request.post(apiUrl("/capsules"), {
       data: {
-        slug: workingSlug,
+        slug: createSlug,
         title: "QA capsule",
         password: TEST_ADMIN_PASSWORD,
         openAt,
         reservationToken: reservation.reservationToken,
+        reservationSessionToken: reservation.reservationSessionToken,
       },
     });
     const created = await createResponse.json();
 
     expect(createResponse.status()).toBe(201);
-    expect(created.slug).toBe(workingSlug);
+    expect(created.slug).toBe(createSlug);
     expect(created.title).toBe("QA capsule");
     expect(created.openAt).toBe(openAt);
     expect(created.expiresAt).toBeTruthy();
+    expect(created.version).toBe(1);
   });
 
   test("capsule lookup branches before and after opening", async ({ request }) => {
@@ -136,7 +150,7 @@ test.describe("Sabujak time capsule QA", () => {
   });
 
   test("message creation works and duplicate nickname rule is environment-aware", async ({ request }) => {
-    const nickname = `qa-nick-${uniqueSuffix}`;
+    const nickname = buildQaNickname("dup");
     const firstMessage = await request.post(apiUrl(`/capsules/${workingSlug}/messages`), {
       data: {
         nickname,
@@ -193,12 +207,18 @@ test.describe("Sabujak time capsule QA", () => {
     expect(verifyResponse.status()).toBe(403);
     expect(verifyPayload?.error?.code).toBe("FORBIDDEN_PASSWORD");
 
+    const currentDetailResponse = await request.get(apiUrl(`/capsules/${workingSlug}`));
+    const currentDetail = await currentDetailResponse.json();
+
+    expect(currentDetailResponse.status()).toBe(200);
+
     const newOpenAt = isoAfterDays(10);
     const updateResponse = await request.patch(apiUrl(`/capsules/${workingSlug}`), {
       data: {
         password: TEST_ADMIN_PASSWORD,
         title: "QA capsule updated",
         openAt: newOpenAt,
+        version: currentDetail.version,
       },
     });
     const updatedCapsule = await updateResponse.json();
@@ -206,6 +226,7 @@ test.describe("Sabujak time capsule QA", () => {
     expect(updateResponse.status()).toBe(200);
     expect(updatedCapsule.openAt).toBe(newOpenAt);
     expect(updatedCapsule.expiresAt).toBe(addDays(newOpenAt, 7));
+    expect(updatedCapsule.version).toBe(currentDetail.version + 1);
 
     const deleteResponse = await request.delete(apiUrl(`/capsules/${workingSlug}`), {
       data: {

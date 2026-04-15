@@ -10,8 +10,7 @@ export const ENABLE_LIVE_COUNT_UI_E2E =
   process.env.ENABLE_LIVE_COUNT_UI_E2E === "true";
 export const CAPSULE_DETAIL_PATH_TEMPLATE =
   process.env.CAPSULE_DETAIL_PATH_TEMPLATE || "/capsules/{slug}";
-export const MESSAGE_COUNT_SELECTOR =
-  process.env.MESSAGE_COUNT_SELECTOR || '[data-testid="capsule-message-count"]';
+export const MESSAGE_COUNT_SELECTOR = process.env.MESSAGE_COUNT_SELECTOR;
 
 export const isMock = QA_ENV === "mock";
 
@@ -21,6 +20,10 @@ export function apiUrl(pathname) {
 
 export function buildUniqueSlug(label) {
   return `${TEST_CAPSULE_SLUG}-${label}-${Date.now()}`;
+}
+
+export function buildQaNickname(label = "qa") {
+  return `${label}-${Date.now().toString(36)}`.slice(0, 20);
 }
 
 export function isoAfterDays(days) {
@@ -64,6 +67,7 @@ export async function createQaCapsule(
       password,
       openAt,
       reservationToken: reservation.reservationToken,
+      reservationSessionToken: reservation.reservationSessionToken,
     },
   });
 
@@ -97,7 +101,7 @@ export async function getCapsuleDetail(request, slug) {
 
 export async function createQaMessage(
   request,
-  { slug, nickname = `qa-nick-${Date.now()}`, content = "Sabujak QA message" },
+  { slug, nickname = buildQaNickname("msg"), content = "Sabujak QA message" },
 ) {
   const response = await request.post(apiUrl(`/capsules/${slug}/messages`), {
     data: {
@@ -109,17 +113,6 @@ export async function createQaMessage(
   const payload = await response.json();
   expect(response.status()).toBe(201);
   return payload;
-}
-
-export async function deleteQaMessage(
-  request,
-  { slug, messageId, password = TEST_ADMIN_PASSWORD },
-) {
-  const response = await request.delete(apiUrl(`/capsules/${slug}/messages/${messageId}`), {
-    data: { password },
-  });
-
-  expect(response.status()).toBe(204);
 }
 
 export async function openMessageCountStream(slug) {
@@ -269,16 +262,35 @@ export async function openCapsuleDetailPage(page, slug) {
 }
 
 export async function readMessageCountFromPage(page) {
-  const locator = page.locator(MESSAGE_COUNT_SELECTOR).first();
+  const candidates = [];
 
-  await expect(locator).toBeVisible();
+  if (MESSAGE_COUNT_SELECTOR) {
+    candidates.push(page.locator(MESSAGE_COUNT_SELECTOR).first());
+  }
 
-  const text = (await locator.textContent()) || "";
+  candidates.push(page.locator('[data-testid="capsule-message-count"]').first());
+  candidates.push(page.locator(".total-heart").first());
+  candidates.push(page.getByText(/개의 따뜻한 마음이 모였어요/).first());
+
+  let text = "";
+
+  for (const locator of candidates) {
+    if ((await locator.count()) === 0) {
+      continue;
+    }
+
+    text = (await locator.textContent()) || "";
+
+    if (text.trim()) {
+      break;
+    }
+  }
+
   const matched = text.match(/\d+/);
 
   if (!matched) {
     throw new Error(
-      `Could not parse message count from selector "${MESSAGE_COUNT_SELECTOR}". text="${text}"`,
+      `Could not parse message count. selector="${MESSAGE_COUNT_SELECTOR || "(auto)"}" text="${text}"`,
     );
   }
 
